@@ -1,5 +1,7 @@
 # Paper Markdown Extractor
 
+[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](https://github.com/cema-sait/quick-text/actions/workflows/tests.yml)
+
 A small Qt desktop GUI for converting academic PDFs into clean Markdown. It extracts:
 
 - Native PDF text with heading heuristics
