@@ -192,6 +192,8 @@ def _extract_text(
     excluded = list(excluded_rects)
     blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_LIGATURES).get("blocks", [])
     lines: list[str] = []
+    equation_groups = _equation_page_rects(page, blocks, excluded) if equation_image_writer else []
+    emitted_equation_groups: set[int] = set()
 
     for block in blocks:
         if block.get("type") != 0:
@@ -200,14 +202,15 @@ def _extract_text(
         if any(rect.intersects(table_rect) for table_rect in excluded):
             continue
 
-        if equation_image_writer:
-            equation_rect = _equation_block_rect(page, block)
-            if equation_rect:
-                equation_markdown = equation_image_writer(equation_rect)
+        group_index = _matching_equation_group(rect, equation_groups)
+        if group_index is not None:
+            if group_index not in emitted_equation_groups:
+                equation_markdown = equation_image_writer(equation_groups[group_index]) if equation_image_writer else None
                 if equation_markdown:
                     lines.append(equation_markdown)
                     lines.append("")
-                    continue
+                    emitted_equation_groups.add(group_index)
+            continue
 
         for line in block.get("lines", []):
             text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
@@ -220,7 +223,56 @@ def _extract_text(
     return "\n".join(lines).strip()
 
 
-def _equation_block_rect(page: "fitz.Page", block: dict) -> "fitz.Rect | None":
+def _equation_page_rects(page: "fitz.Page", blocks: list[dict], excluded_rects: list["fitz.Rect"]) -> list["fitz.Rect"]:
+    fragments: list[fitz.Rect] = []
+    for block in blocks:
+        if block.get("type") != 0:
+            continue
+        block_rect = fitz.Rect(block["bbox"])
+        if any(block_rect.intersects(excluded) for excluded in excluded_rects):
+            continue
+        raw_rect = _equation_block_rect(page, block, broaden=False)
+        if raw_rect:
+            fragments.append(raw_rect)
+
+    if not fragments:
+        return []
+
+    fragments.sort(key=lambda rect: (rect.y0, rect.x0))
+    groups: list[fitz.Rect] = []
+    for fragment in fragments:
+        if not groups:
+            groups.append(fitz.Rect(fragment))
+            continue
+
+        previous = groups[-1]
+        vertical_gap = fragment.y0 - previous.y1
+        overlaps_vertically = fragment.y0 <= previous.y1 + 2
+        same_display_region = vertical_gap <= 24 and abs(_rect_center_y(fragment) - _rect_center_y(previous)) <= 58
+        if overlaps_vertically or same_display_region:
+            previous.include_rect(fragment)
+        else:
+            groups.append(fitz.Rect(fragment))
+
+    return [_broaden_equation_rect(page, group) for group in groups]
+
+
+def _matching_equation_group(rect: "fitz.Rect", groups: list["fitz.Rect"]) -> int | None:
+    for index, group in enumerate(groups):
+        if _vertical_overlap(rect, group) > 0:
+            return index
+    return None
+
+
+def _vertical_overlap(first: "fitz.Rect", second: "fitz.Rect") -> float:
+    return max(0.0, min(first.y1, second.y1) - max(first.y0, second.y0))
+
+
+def _rect_center_y(rect: "fitz.Rect") -> float:
+    return (rect.y0 + rect.y1) / 2
+
+
+def _equation_block_rect(page: "fitz.Page", block: dict, broaden: bool = True) -> "fitz.Rect | None":
     line_items = []
     for line in block.get("lines", []):
         text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
@@ -233,15 +285,21 @@ def _equation_block_rect(page: "fitz.Page", block: dict) -> "fitz.Rect | None":
     if not line_items:
         return None
 
-    candidates = [_looks_like_equation(text) for text, _ in line_items]
-    if not any(candidates):
+    texts = [text for text, _ in line_items]
+    candidates = [_looks_like_equation(text) for text in texts]
+    continuations = [_looks_like_equation_continuation(text) for text in texts]
+    if not any(candidates) and not (all(continuations) and _equation_block_is_compact(texts, candidates)):
         return None
 
-    if len(line_items) > 1 and not _equation_block_is_compact([text for text, _ in line_items], candidates):
+    if len(line_items) > 1 and not _equation_block_is_compact(texts, candidates):
         return None
 
-    first = next(index for index, candidate in enumerate(candidates) if candidate)
-    last = len(candidates) - 1 - next(index for index, candidate in enumerate(reversed(candidates)) if candidate)
+    if any(candidates):
+        first = next(index for index, candidate in enumerate(candidates) if candidate)
+        last = len(candidates) - 1 - next(index for index, candidate in enumerate(reversed(candidates)) if candidate)
+    else:
+        first = 0
+        last = len(line_items) - 1
     while first > 0 and _looks_like_equation_continuation(line_items[first - 1][0]):
         first -= 1
     while last + 1 < len(line_items) and _looks_like_equation_continuation(line_items[last + 1][0]):
@@ -250,7 +308,7 @@ def _equation_block_rect(page: "fitz.Page", block: dict) -> "fitz.Rect | None":
     equation_rect = fitz.Rect(line_items[first][1])
     for _, rect in line_items[first + 1 : last + 1]:
         equation_rect.include_rect(rect)
-    return _broaden_equation_rect(page, equation_rect)
+    return _broaden_equation_rect(page, equation_rect) if broaden else equation_rect
 
 
 def _equation_block_is_compact(texts: list[str], candidates: list[bool]) -> bool:
@@ -280,8 +338,9 @@ def _looks_like_equation_continuation(text: str) -> bool:
     math_chars = len(re.findall(r"[=∑∫√∞≈≤≥±×÷·^_{}()\[\]�]|[\uf000-\uf8ff]|[α-ωΑ-Ω]", stripped))
     compact_symbols = all(len(token) <= 6 for token in tokens)
     compact_variable_tokens = len(re.findall(r"\b[A-Za-z]{1,3}\d*\b", stripped))
+    variable_only_fragment = compact_variable_tokens == len(tokens) and long_words == 0 and len(tokens) <= 4
     return compact_symbols and long_words <= 1 and (
-        math_chars > 0 or len(tokens) <= 3 or compact_variable_tokens >= 3
+        math_chars > 0 or variable_only_fragment or compact_variable_tokens >= 3
     )
 
 
