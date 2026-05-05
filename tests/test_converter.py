@@ -16,6 +16,7 @@ from paper_md_extractor.converter import (
     _format_metadata,
     _format_text,
     _looks_like_equation,
+    _equation_block_rect,
     _line_rect,
     _style_line,
     _table_rect,
@@ -342,3 +343,71 @@ def test_extract_equation_image_handles_bad_clip(tmp_path: Path) -> None:
             raise RuntimeError('render failed')
 
     assert converter._extract_equation_image(Page(), tmp_path, 'paper', 1, 1, fitz.Rect(10, 10, 20, 20), 2.0) is None
+
+
+
+def test_broken_multiline_equation_text_is_grouped_into_broad_crop() -> None:
+    class Page:
+        rect = fitz.Rect(0, 0, 600, 800)
+        def get_text(self, kind, flags=0):
+            return {
+                'blocks': [
+                    {
+                        'type': 0,
+                        'bbox': (92, 110, 548, 238),
+                        'lines': [
+                            {'bbox': (96, 112, 530, 126), 'spans': [{'text': '(2) �cij = K cij sl'}]},
+                            {'bbox': (226, 128, 236, 142), 'spans': [{'text': 'j'}]},
+                            {'bbox': (96, 150, 530, 164), 'spans': [{'text': '(3) Mi = log2'}]},
+                            {'bbox': (160, 166, 308, 180), 'spans': [{'text': 'cij Nj cik Nk'}]},
+                            {'bbox': (96, 188, 530, 202), 'spans': [{'text': '(4) Ai = 1'}]},
+                            {'bbox': (146, 204, 214, 218), 'spans': [{'text': '2 log2'}]},
+                            {'bbox': (238, 220, 546, 234), 'spans': [{'text': ', for ci. �= 0'}]},
+                        ],
+                    }
+                ]
+            }
+
+    captured: list[fitz.Rect] = []
+    text = converter._extract_text(Page(), [], lambda rect: captured.append(rect) or '![Equation](images/equation.png)')
+
+    assert text == '![Equation](images/equation.png)'
+    assert len(captured) == 1
+    assert captured[0].x0 == pytest.approx(48)
+    assert captured[0].x1 == pytest.approx(552)
+    assert captured[0].y0 < 112
+    assert captured[0].y1 > 234
+
+
+def test_equation_block_rect_ignores_prose_blocks_and_broadens_right_edge_numbers() -> None:
+    class Page:
+        rect = fitz.Rect(0, 0, 600, 800)
+
+    prose_block = {
+        'type': 0,
+        'bbox': (72, 72, 500, 130),
+        'lines': [
+            {'bbox': (72, 72, 500, 88), 'spans': [{'text': 'This sentence has x = 1 but should remain text.'}]},
+            {'bbox': (72, 92, 500, 108), 'spans': [{'text': 'It is explanatory prose, not a display equation.'}]},
+        ],
+    }
+    equation_block = {
+        'type': 0,
+        'bbox': (120, 180, 540, 224),
+        'lines': [
+            {'bbox': (120, 180, 540, 196), 'spans': [{'text': 'Ai = 1'}]},
+            {'bbox': (142, 202, 530, 218), 'spans': [{'text': 'cij Nj · cik Nk (4)'}]},
+        ],
+    }
+
+    assert _equation_block_rect(Page(), prose_block) is None
+    rect = _equation_block_rect(Page(), equation_block)
+    assert rect == fitz.Rect(48, 172, 552, 226)
+
+
+def test_equation_heuristic_handles_extracted_symbol_noise_and_indices() -> None:
+    assert _looks_like_equation('(2) �cij = K cij sl')
+    assert _looks_like_equation('(4) Ai = 1')
+    assert _looks_like_equation(', for ci. �= 0')
+    assert converter._looks_like_equation_continuation('cij Nj cik Nk')
+    assert not _looks_like_equation('This sentence has x = 1 but should remain text.')

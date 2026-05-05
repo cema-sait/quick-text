@@ -199,21 +199,101 @@ def _extract_text(
         rect = fitz.Rect(block["bbox"])
         if any(rect.intersects(table_rect) for table_rect in excluded):
             continue
+
+        if equation_image_writer:
+            equation_rect = _equation_block_rect(page, block)
+            if equation_rect:
+                equation_markdown = equation_image_writer(equation_rect)
+                if equation_markdown:
+                    lines.append(equation_markdown)
+                    lines.append("")
+                    continue
+
         for line in block.get("lines", []):
             text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
             if not text:
                 continue
-            if equation_image_writer and _looks_like_equation(text):
-                equation_rect = _line_rect(line)
-                equation_markdown = equation_image_writer(equation_rect) if equation_rect else None
-                if equation_markdown:
-                    lines.append(equation_markdown)
-                    continue
             lines.append(_style_line(text, line.get("spans", [])))
         if lines and lines[-1] != "":
             lines.append("")
 
     return "\n".join(lines).strip()
+
+
+def _equation_block_rect(page: "fitz.Page", block: dict) -> "fitz.Rect | None":
+    line_items = []
+    for line in block.get("lines", []):
+        text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+        if not text:
+            continue
+        rect = _line_rect(line)
+        if rect:
+            line_items.append((text, rect))
+
+    if not line_items:
+        return None
+
+    candidates = [_looks_like_equation(text) for text, _ in line_items]
+    if not any(candidates):
+        return None
+
+    if len(line_items) > 1 and not _equation_block_is_compact([text for text, _ in line_items], candidates):
+        return None
+
+    first = next(index for index, candidate in enumerate(candidates) if candidate)
+    last = len(candidates) - 1 - next(index for index, candidate in enumerate(reversed(candidates)) if candidate)
+    while first > 0 and _looks_like_equation_continuation(line_items[first - 1][0]):
+        first -= 1
+    while last + 1 < len(line_items) and _looks_like_equation_continuation(line_items[last + 1][0]):
+        last += 1
+
+    equation_rect = fitz.Rect(line_items[first][1])
+    for _, rect in line_items[first + 1 : last + 1]:
+        equation_rect.include_rect(rect)
+    return _broaden_equation_rect(page, equation_rect)
+
+
+def _equation_block_is_compact(texts: list[str], candidates: list[bool]) -> bool:
+    candidate_count = sum(candidates)
+    if candidate_count >= 2:
+        return True
+    if len(texts) <= 3:
+        return True
+
+    prose_words = sum(len(re.findall(r"[A-Za-z]{4,}", text)) for text in texts)
+    mathish_lines = sum(_looks_like_equation_continuation(text) for text in texts)
+    return prose_words <= max(4, len(texts)) and mathish_lines >= len(texts) // 2
+
+
+def _looks_like_equation_continuation(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped or len(stripped) > 80:
+        return False
+    if _looks_like_equation(stripped):
+        return True
+
+    tokens = re.findall(r"\S+", stripped)
+    if not tokens or len(tokens) > 8:
+        return False
+
+    long_words = len(re.findall(r"[A-Za-z]{4,}", stripped))
+    math_chars = len(re.findall(r"[=∑∫√∞≈≤≥±×÷·^_{}()\[\]�]|[\uf000-\uf8ff]|[α-ωΑ-Ω]", stripped))
+    compact_symbols = all(len(token) <= 6 for token in tokens)
+    compact_variable_tokens = len(re.findall(r"\b[A-Za-z]{1,3}\d*\b", stripped))
+    return compact_symbols and long_words <= 1 and (
+        math_chars > 0 or len(tokens) <= 3 or compact_variable_tokens >= 3
+    )
+
+
+def _broaden_equation_rect(page: "fitz.Page", rect: "fitz.Rect") -> "fitz.Rect":
+    broadened = fitz.Rect(rect)
+    page_width = page.rect.width
+    horizontal_margin = min(54, page_width * 0.08)
+    broadened.x0 = page.rect.x0 + horizontal_margin
+    broadened.x1 = page.rect.x1 - horizontal_margin
+    broadened.y0 = max(page.rect.y0, broadened.y0 - 8)
+    broadened.y1 = min(page.rect.y1, broadened.y1 + 8)
+    return broadened
 
 
 def _line_rect(line: dict) -> "fitz.Rect | None":
@@ -284,12 +364,28 @@ def _style_line(text: str, spans: list[dict]) -> str:
 
 
 def _looks_like_equation(text: str) -> bool:
-    if len(text) > 180 or len(text) < 3:
+    stripped = text.strip()
+    if len(stripped) > 180 or len(stripped) < 3:
         return False
-    math_tokens = len(re.findall(r"[=∑∫√∞≈≤≥±×÷^_{}]|\\[a-zA-Z]+", text))
-    letters = len(re.findall(r"[A-Za-z]", text))
-    words = len(re.findall(r"[A-Za-z]{3,}", text))
-    return math_tokens >= 2 and words <= max(3, letters // 12)
+
+    equation_index = bool(re.search(r"(^\(?\d+[a-zA-Z]?\)?\s+|\s+\(?\d+[a-zA-Z]?\)?$)", stripped))
+    math_tokens = len(
+        re.findall(
+            r"[=∑∫√∞≈≤≥±×÷·^_{}]|\\[a-zA-Z]+|[α-ωΑ-Ω]|[\uf000-\uf8ff]|�||||",
+            stripped,
+        )
+    )
+    letters = len(re.findall(r"[A-Za-z]", stripped))
+    words = len(re.findall(r"[A-Za-z]{3,}", stripped))
+    compact_variable_tokens = len(re.findall(r"\b[A-Za-z]{1,3}\d*\b", stripped))
+
+    if equation_index and math_tokens >= 1 and words <= 6:
+        return True
+    if math_tokens >= 2 and words <= max(4, letters // 10):
+        return True
+    if math_tokens >= 1 and compact_variable_tokens >= 2 and words <= 4:
+        return True
+    return False
 
 
 def _format_text(text: str) -> str:

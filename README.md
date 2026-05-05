@@ -7,7 +7,7 @@ A small Qt desktop GUI for converting academic PDFs into clean Markdown. It extr
 - Native PDF text with heading heuristics
 - Tables, using PyMuPDF table detection
 - Images into an adjacent `images/` directory
-- Display equations cropped as images for higher visual fidelity, with text math blocks available as a fallback
+- Display equations cropped as broad row images for higher visual fidelity, including right-edge equation numbers, with text math blocks available as a fallback
 - Optional OCR fallback for scanned pages when Tesseract is installed
 - Integrated Markdown preview with local images, equation crops, and tables rendered from the generated output
 
