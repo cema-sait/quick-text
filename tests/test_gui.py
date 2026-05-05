@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from paper_md_extractor import gui
 from paper_md_extractor.converter import ConversionOptions, ConversionResult
-from paper_md_extractor.gui import ConversionWorker, PaperMarkdownWindow
+from paper_md_extractor.gui import ConversionWorker, PaperMarkdownWindow, app_icon
 
 
 @pytest.fixture(scope='session')
@@ -30,6 +30,8 @@ def window(app: QApplication) -> PaperMarkdownWindow:
 
 def test_window_initial_state_and_log(window: PaperMarkdownWindow) -> None:
     assert window.windowTitle() == 'Quick Text'
+    assert not app_icon().isNull()
+    assert not window.windowIcon().isNull()
     assert window.convert_button.isEnabled()
     assert not window.open_button.isEnabled()
     assert window.images_check.isChecked()

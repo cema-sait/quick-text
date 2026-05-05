@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 import sys
 import traceback
 
 from PySide6.QtCore import QObject, QThread, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtGui import QAction, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -27,6 +28,12 @@ from PySide6.QtWidgets import (
 )
 
 from .converter import ConversionOptions, ConversionResult, convert_pdf_to_markdown
+
+
+def app_icon() -> QIcon:
+    source = resources.files("paper_md_extractor").joinpath("assets", "app-icon.svg")
+    with resources.as_file(source) as icon_path:
+        return QIcon(str(icon_path))
 
 
 class ConversionWorker(QObject):
@@ -60,6 +67,7 @@ class PaperMarkdownWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Quick Text")
+        self.setWindowIcon(app_icon())
         self.resize(860, 520)
         self.setMinimumSize(760, 460)
 
@@ -295,6 +303,7 @@ class PaperMarkdownWindow(QMainWindow):
 def main() -> None:  # pragma: no cover
     app = QApplication(sys.argv)
     app.setApplicationName("Quick Text")
+    app.setWindowIcon(app_icon())
     window = PaperMarkdownWindow()
     window.show()
     sys.exit(app.exec())

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Quick Text app icon</title>
+  <desc id="desc">A teal document extraction mark on a deep navy rounded-square background.</desc>
+  <defs>
+    <linearGradient id="paperGradient" x1="296" y1="188" x2="724" y2="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FBFD"/>
+      <stop offset="1" stop-color="#D9EEF0"/>
+    </linearGradient>
+    <linearGradient id="markGradient" x1="270" y1="290" x2="770" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4FD1C5"/>
+      <stop offset="1" stop-color="#0B8CA6"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#071D2A" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="188" fill="#12344D"/>
+  <circle cx="512" cy="512" r="342" fill="#0D405C" opacity="0.62"/>
+  <g filter="url(#softShadow)">
+    <path d="M318 174h296l126 126v538H318V174Z" fill="url(#paperGradient)"/>
+    <path d="M614 174v128h126L614 174Z" fill="#B7DDE2"/>
+    <path d="M614 174v128h126" fill="none" stroke="#8FC7D0" stroke-width="16" stroke-linejoin="round"/>
+    <rect x="384" y="386" width="256" height="34" rx="17" fill="#12344D" opacity="0.9"/>
+    <rect x="384" y="466" width="302" height="34" rx="17" fill="#12344D" opacity="0.72"/>
+    <rect x="384" y="546" width="210" height="34" rx="17" fill="#12344D" opacity="0.58"/>
+    <path d="M262 704h220l58-92 72 148 68-110h110" fill="none" stroke="url(#markGradient)" stroke-width="54" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="790" cy="650" r="34" fill="#4FD1C5"/>
+    <path d="M356 736v-96h31l36 54 36-54h31v96h-32v-48l-26 39h-18l-26-39v48h-32Z" fill="#F6F8FB"/>
+    <path d="M538 736v-31h-38l62-72v72h23v31h-23v31h-24v-31Z" fill="#F6F8FB" opacity="0.96"/>
+  </g>
+</svg>
