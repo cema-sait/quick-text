@@ -39,6 +39,7 @@ def test_window_initial_state_and_log(window: PaperMarkdownWindow) -> None:
     assert window.images_check.isChecked()
     assert window.tables_check.isChecked()
     assert not window.ocr_check.isChecked()
+    assert window.equations_check.isChecked()
     window._append_log('hello')
     assert 'hello' in window.log.toPlainText()
 
@@ -140,6 +141,7 @@ def test_convert_starts_worker_with_selected_options(monkeypatch: pytest.MonkeyP
     window.images_check.setChecked(False)
     window.tables_check.setChecked(True)
     window.ocr_check.setChecked(True)
+    window.equations_check.setChecked(False)
 
     captured: dict[str, object] = {}
 
@@ -190,6 +192,7 @@ def test_convert_starts_worker_with_selected_options(monkeypatch: pytest.MonkeyP
     assert not options.extract_images
     assert options.extract_tables
     assert options.ocr_scanned_pages
+    assert not options.extract_equations_as_images
     assert not window.convert_button.isEnabled()
     assert 'Starting conversion' in window.log.toPlainText()
 
@@ -198,7 +201,7 @@ def test_progress_finished_failed_and_clear_worker_refs(monkeypatch: pytest.Monk
     window.convert_button.setEnabled(False)
     markdown_path = tmp_path / 'paper.md'
     markdown_path.write_text('# Converted Markdown', encoding='utf-8')
-    result = ConversionResult(markdown_path, tmp_path / 'images', 3, 1.25, 2, 1, 1)
+    result = ConversionResult(markdown_path, tmp_path / 'images', 3, 1.25, 2, 1, 1, 2)
 
     window.on_progress('Reading page 2 of 3', 2, 3)
     assert window.progress.value() == 33
@@ -209,6 +212,7 @@ def test_progress_finished_failed_and_clear_worker_refs(monkeypatch: pytest.Monk
     assert window.progress.value() == 100
     assert window.convert_button.isEnabled()
     assert window.open_button.isEnabled()
+    assert '2 equations captured' in window.status.text()
     assert 'OCR used on 1 pages' in window.status.text()
     assert 'Previewing paper.md' in window.log.toPlainText()
 

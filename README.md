@@ -7,9 +7,9 @@ A small Qt desktop GUI for converting academic PDFs into clean Markdown. It extr
 - Native PDF text with heading heuristics
 - Tables, using PyMuPDF table detection
 - Images into an adjacent `images/` directory
-- Equations as preserved PDF text where available, with math-like blocks highlighted
+- Display equations cropped as images for higher visual fidelity, with text math blocks available as a fallback
 - Optional OCR fallback for scanned pages when Tesseract is installed
-- Integrated Markdown preview with local images and tables rendered from the generated output
+- Integrated Markdown preview with local images, equation crops, and tables rendered from the generated output
 
 The fast path is built for digitally generated academic papers. A 10-page text PDF should usually finish well under one minute on a modern laptop. Scanned PDFs are slower because OCR requires page rendering.
 

@@ -23,6 +23,7 @@ class ConversionOptions:
     extract_images: bool = True
     extract_tables: bool = True
     ocr_scanned_pages: bool = False
+    extract_equations_as_images: bool = True
     image_zoom: float = 2.0
     min_text_chars_for_ocr_skip: int = 40
 
@@ -36,6 +37,7 @@ class ConversionResult:
     image_count: int
     table_count: int
     ocr_page_count: int
+    equation_image_count: int = 0
 
 
 def convert_pdf_to_markdown(
@@ -52,13 +54,14 @@ def convert_pdf_to_markdown(
     destination.mkdir(parents=True, exist_ok=True)
 
     images_dir = destination / "images"
-    if options.extract_images:
+    if options.extract_images or options.extract_equations_as_images:
         images_dir.mkdir(parents=True, exist_ok=True)
 
     started = time.perf_counter()
     image_count = 0
     table_count = 0
     ocr_page_count = 0
+    equation_image_count = 0
     parts: list[str] = [f"# {source.stem}\n"]
 
     with fitz.open(source) as document:
@@ -77,7 +80,23 @@ def convert_pdf_to_markdown(
             table_count += len(tables)
             table_rects = [rect for table in tables if (rect := _table_rect(table)) is not None]
 
-            text = _extract_text(page, table_rects)
+            def write_equation_image(rect: "fitz.Rect") -> str | None:
+                nonlocal equation_image_count
+                next_number = equation_image_count + 1
+                image_path = _extract_equation_image(
+                    page, images_dir, source.stem, page_index, next_number, rect, options.image_zoom
+                )
+                if image_path is None:
+                    return None
+                equation_image_count = next_number
+                rel = image_path.relative_to(destination).as_posix()
+                return f"![Equation {page_index}.{next_number}]({rel})"
+
+            text = _extract_text(
+                page,
+                table_rects,
+                write_equation_image if options.extract_equations_as_images else None,
+            )
             if options.ocr_scanned_pages and len(text.strip()) < options.min_text_chars_for_ocr_skip:
                 ocr_text = _ocr_page(page, options.image_zoom)
                 if ocr_text.strip():
@@ -112,6 +131,7 @@ def convert_pdf_to_markdown(
         image_count=image_count,
         table_count=table_count,
         ocr_page_count=ocr_page_count,
+        equation_image_count=equation_image_count,
     )
 
 
@@ -164,7 +184,11 @@ def _table_rect(table: object) -> "fitz.Rect | None":
     return table_bounds
 
 
-def _extract_text(page: "fitz.Page", excluded_rects: Iterable["fitz.Rect"]) -> str:
+def _extract_text(
+    page: "fitz.Page",
+    excluded_rects: Iterable["fitz.Rect"],
+    equation_image_writer: Callable[["fitz.Rect"], str | None] | None = None,
+) -> str:
     excluded = list(excluded_rects)
     blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_LIGATURES).get("blocks", [])
     lines: list[str] = []
@@ -179,11 +203,71 @@ def _extract_text(page: "fitz.Page", excluded_rects: Iterable["fitz.Rect"]) -> s
             text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
             if not text:
                 continue
+            if equation_image_writer and _looks_like_equation(text):
+                equation_rect = _line_rect(line)
+                equation_markdown = equation_image_writer(equation_rect) if equation_rect else None
+                if equation_markdown:
+                    lines.append(equation_markdown)
+                    continue
             lines.append(_style_line(text, line.get("spans", [])))
         if lines and lines[-1] != "":
             lines.append("")
 
     return "\n".join(lines).strip()
+
+
+def _line_rect(line: dict) -> "fitz.Rect | None":
+    bbox = line.get("bbox")
+    if bbox:
+        try:
+            return fitz.Rect(bbox)
+        except Exception:
+            pass
+
+    spans = line.get("spans", [])
+    rects = []
+    for span in spans:
+        bbox = span.get("bbox")
+        if not bbox:
+            continue
+        try:
+            rects.append(fitz.Rect(bbox))
+        except Exception:
+            pass
+    if not rects:
+        return None
+
+    line_bounds = fitz.Rect(rects[0])
+    for rect in rects[1:]:
+        line_bounds.include_rect(rect)
+    return line_bounds
+
+
+def _extract_equation_image(
+    page: "fitz.Page",
+    images_dir: Path,
+    paper_stem: str,
+    page_index: int,
+    equation_number: int,
+    rect: "fitz.Rect",
+    zoom: float,
+) -> Path | None:
+    clip = fitz.Rect(rect)
+    clip.x0 = max(page.rect.x0, clip.x0 - 8)
+    clip.y0 = max(page.rect.y0, clip.y0 - 6)
+    clip.x1 = min(page.rect.x1, clip.x1 + 8)
+    clip.y1 = min(page.rect.y1, clip.y1 + 6)
+    if clip.is_empty or clip.is_infinite:
+        return None
+
+    images_dir.mkdir(parents=True, exist_ok=True)
+    image_path = images_dir / f"{paper_stem}-p{page_index:03d}-equation-{equation_number:02d}.png"
+    try:
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip, alpha=False)
+        pixmap.save(image_path)
+    except Exception:
+        return None
+    return image_path
 
 
 def _style_line(text: str, spans: list[dict]) -> str:
@@ -230,7 +314,7 @@ def _format_text(text: str) -> str:
                 paragraphs.append(" ".join(current))
                 current = []
             continue
-        if line.startswith("#"):
+        if line.startswith("#") or line.startswith("!["):
             if current:
                 paragraphs.append(" ".join(current))
                 current = []

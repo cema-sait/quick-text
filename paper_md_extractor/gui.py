@@ -87,6 +87,8 @@ class PaperMarkdownWindow(QMainWindow):
         self.tables_check = QCheckBox("Tables")
         self.tables_check.setChecked(True)
         self.ocr_check = QCheckBox("OCR scanned pages")
+        self.equations_check = QCheckBox("Equations as images")
+        self.equations_check.setChecked(True)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -150,6 +152,7 @@ class PaperMarkdownWindow(QMainWindow):
         options = QHBoxLayout()
         options.addWidget(self.images_check)
         options.addWidget(self.tables_check)
+        options.addWidget(self.equations_check)
         options.addWidget(self.ocr_check)
         options.addStretch(1)
         form_layout.addRow("Extraction", options)
@@ -288,6 +291,7 @@ class PaperMarkdownWindow(QMainWindow):
             extract_images=self.images_check.isChecked(),
             extract_tables=self.tables_check.isChecked(),
             ocr_scanned_pages=self.ocr_check.isChecked(),
+            extract_equations_as_images=self.equations_check.isChecked(),
         )
 
         self.worker_thread = QThread(self)
@@ -320,6 +324,8 @@ class PaperMarkdownWindow(QMainWindow):
             f"Done in {result.elapsed_seconds:.1f}s: {result.page_count} pages, "
             f"{result.table_count} tables, {result.image_count} images."
         )
+        if result.equation_image_count:
+            message += f" {result.equation_image_count} equations captured."
         if result.ocr_page_count:
             message += f" OCR used on {result.ocr_page_count} pages."
         self.status.setText(message)
