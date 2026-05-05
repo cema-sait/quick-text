@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QSplitter,
+    QTextBrowser,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -68,8 +70,8 @@ class PaperMarkdownWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Quick Text")
         self.setWindowIcon(app_icon())
-        self.resize(860, 520)
-        self.setMinimumSize(760, 460)
+        self.resize(1120, 700)
+        self.setMinimumSize(880, 560)
 
         self.result_path: Path | None = None
         self.worker_thread: QThread | None = None
@@ -97,8 +99,14 @@ class PaperMarkdownWindow(QMainWindow):
         self.log.setMinimumHeight(130)
 
         self.convert_button = QPushButton("Convert")
+        self.open_markdown_button = QPushButton("Open Markdown")
         self.open_button = QPushButton("Open Output Folder")
         self.open_button.setEnabled(False)
+
+        self.preview = QTextBrowser()
+        self.preview.setOpenExternalLinks(True)
+        self.preview.setReadOnly(True)
+        self.preview.setHtml("<h2>Markdown Preview</h2><p>Convert a PDF or open a Markdown file to preview it here.</p>")
 
         self._build_ui()
         self._build_menu()
@@ -154,10 +162,32 @@ class PaperMarkdownWindow(QMainWindow):
         progress_grid.addWidget(self.status, 1, 0, 1, 2)
         root.addLayout(progress_grid)
 
-        root.addWidget(self.log, 1)
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        log_panel = QWidget()
+        log_layout = QVBoxLayout(log_panel)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        log_label = QLabel("Conversion Log")
+        log_label.setObjectName("SectionLabel")
+        log_layout.addWidget(log_label)
+        log_layout.addWidget(self.log)
+
+        preview_panel = QWidget()
+        preview_layout = QVBoxLayout(preview_panel)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_label = QLabel("Markdown Preview")
+        preview_label.setObjectName("SectionLabel")
+        preview_layout.addWidget(preview_label)
+        preview_layout.addWidget(self.preview)
+
+        content_splitter.addWidget(log_panel)
+        content_splitter.addWidget(preview_panel)
+        content_splitter.setStretchFactor(0, 1)
+        content_splitter.setStretchFactor(1, 2)
+        root.addWidget(content_splitter, 1)
 
         actions = QHBoxLayout()
         actions.addStretch(1)
+        actions.addWidget(self.open_markdown_button)
         actions.addWidget(self.open_button)
         actions.addWidget(self.convert_button)
         root.addLayout(actions)
@@ -166,8 +196,9 @@ class PaperMarkdownWindow(QMainWindow):
             """
             QMainWindow { background: #f7f7f5; }
             QLabel#Header { font-size: 28px; font-weight: 700; color: #1f2933; }
+            QLabel#SectionLabel { font-weight: 700; color: #344054; }
             QFrame#Panel { background: #ffffff; border: 1px solid #d8d8d2; border-radius: 8px; }
-            QLineEdit, QTextEdit { background: #ffffff; border: 1px solid #c8c8c0; border-radius: 6px; padding: 8px; }
+            QLineEdit, QTextEdit, QTextBrowser { background: #ffffff; border: 1px solid #c8c8c0; border-radius: 6px; padding: 8px; }
             QPushButton { padding: 8px 14px; border-radius: 6px; border: 1px solid #9aa0a6; background: #ffffff; }
             QPushButton:hover { background: #f0f4f8; }
             QPushButton:pressed { background: #e2e8f0; }
@@ -187,6 +218,10 @@ class PaperMarkdownWindow(QMainWindow):
         output_action.triggered.connect(self.choose_output)
         file_menu.addAction(output_action)
 
+        markdown_action = QAction("Open Markdown Preview...", self)
+        markdown_action.triggered.connect(self.choose_markdown_preview)
+        file_menu.addAction(markdown_action)
+
         file_menu.addSeparator()
         quit_action = QAction("Quit", self)
         quit_action.triggered.connect(self.close)
@@ -194,6 +229,7 @@ class PaperMarkdownWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.convert_button.clicked.connect(self.convert)
+        self.open_markdown_button.clicked.connect(self.choose_markdown_preview)
         self.open_button.clicked.connect(self.open_output_folder)
 
     @Slot()
@@ -212,6 +248,23 @@ class PaperMarkdownWindow(QMainWindow):
             self.output_input.setText(path)
 
     @Slot()
+    def choose_markdown_preview(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Open Markdown", "", "Markdown files (*.md *.markdown);;All files (*)")
+        if path:
+            self.load_markdown_preview(Path(path))
+
+    def load_markdown_preview(self, markdown_path: Path) -> None:
+        try:
+            markdown = markdown_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            QMessageBox.critical(self, "Preview failed", str(exc))
+            return
+
+        self.preview.document().setBaseUrl(QUrl.fromLocalFile(str(markdown_path.parent) + "/"))
+        self.preview.setMarkdown(markdown)
+        self._append_log(f"Previewing {markdown_path.name}")
+
+    @Slot()
     def convert(self) -> None:
         pdf = self.pdf_input.text().strip()
         output = self.output_input.text().strip()
@@ -225,6 +278,7 @@ class PaperMarkdownWindow(QMainWindow):
         self.result_path = None
         self.progress.setValue(0)
         self.log.clear()
+        self.preview.setHtml("<h2>Markdown Preview</h2><p>Preview will update when conversion finishes.</p>")
         self.open_button.setEnabled(False)
         self.convert_button.setEnabled(False)
         self.status.setText("Starting conversion...")
@@ -270,6 +324,7 @@ class PaperMarkdownWindow(QMainWindow):
             message += f" OCR used on {result.ocr_page_count} pages."
         self.status.setText(message)
         self._append_log(message)
+        self.load_markdown_preview(result.markdown_path)
 
     @Slot(str)
     def on_failed(self, error: str) -> None:

@@ -34,6 +34,8 @@ def test_window_initial_state_and_log(window: PaperMarkdownWindow) -> None:
     assert not window.windowIcon().isNull()
     assert window.convert_button.isEnabled()
     assert not window.open_button.isEnabled()
+    assert window.open_markdown_button.isEnabled()
+    assert 'Markdown Preview' in window.preview.toHtml()
     assert window.images_check.isChecked()
     assert window.tables_check.isChecked()
     assert not window.ocr_check.isChecked()
@@ -74,6 +76,44 @@ def test_choose_output_sets_folder_and_cancel_is_noop(monkeypatch: pytest.Monkey
     monkeypatch.setattr(gui.QFileDialog, 'getExistingDirectory', lambda *args, **kwargs: '')
     window.choose_output()
     assert window.output_input.text() == str(tmp_path)
+
+
+def test_markdown_preview_loads_markdown_with_relative_image_base(window: PaperMarkdownWindow, tmp_path: Path) -> None:
+    images = tmp_path / 'images'
+    images.mkdir()
+    (images / 'figure.png').write_bytes(b'not-a-real-image-but-a-valid-relative-artifact')
+    markdown = tmp_path / 'paper.md'
+    markdown.write_text('# Title\n\n![Figure](images/figure.png)\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n', encoding='utf-8')
+
+    window.load_markdown_preview(markdown)
+
+    assert window.preview.document().baseUrl().toLocalFile() == str(tmp_path) + '/'
+    html = window.preview.toHtml()
+    assert 'Title' in html
+    assert 'images/figure.png' in html
+    assert 'Previewing paper.md' in window.log.toPlainText()
+
+
+def test_choose_markdown_preview_loads_selected_file(monkeypatch: pytest.MonkeyPatch, window: PaperMarkdownWindow, tmp_path: Path) -> None:
+    markdown = tmp_path / 'paper.md'
+    markdown.write_text('# Existing Markdown', encoding='utf-8')
+    monkeypatch.setattr(gui.QFileDialog, 'getOpenFileName', lambda *args, **kwargs: (str(markdown), 'Markdown files (*.md)'))
+
+    window.choose_markdown_preview()
+
+    assert 'Existing Markdown' in window.preview.toHtml()
+
+
+def test_choose_markdown_preview_cancel_and_preview_read_error(monkeypatch: pytest.MonkeyPatch, window: PaperMarkdownWindow, tmp_path: Path) -> None:
+    original = window.preview.toHtml()
+    monkeypatch.setattr(gui.QFileDialog, 'getOpenFileName', lambda *args, **kwargs: ('', ''))
+    window.choose_markdown_preview()
+    assert window.preview.toHtml() == original
+
+    errors: list[tuple[str, str]] = []
+    monkeypatch.setattr(gui.QMessageBox, 'critical', lambda parent, title, text: errors.append((title, text)))
+    window.load_markdown_preview(tmp_path / 'missing.md')
+    assert errors and errors[-1][0] == 'Preview failed'
 
 
 def test_convert_validates_inputs(monkeypatch: pytest.MonkeyPatch, window: PaperMarkdownWindow, tmp_path: Path) -> None:
@@ -156,7 +196,9 @@ def test_convert_starts_worker_with_selected_options(monkeypatch: pytest.MonkeyP
 
 def test_progress_finished_failed_and_clear_worker_refs(monkeypatch: pytest.MonkeyPatch, window: PaperMarkdownWindow, tmp_path: Path) -> None:
     window.convert_button.setEnabled(False)
-    result = ConversionResult(tmp_path / 'paper.md', tmp_path / 'images', 3, 1.25, 2, 1, 1)
+    markdown_path = tmp_path / 'paper.md'
+    markdown_path.write_text('# Converted Markdown', encoding='utf-8')
+    result = ConversionResult(markdown_path, tmp_path / 'images', 3, 1.25, 2, 1, 1)
 
     window.on_progress('Reading page 2 of 3', 2, 3)
     assert window.progress.value() == 33
@@ -168,6 +210,7 @@ def test_progress_finished_failed_and_clear_worker_refs(monkeypatch: pytest.Monk
     assert window.convert_button.isEnabled()
     assert window.open_button.isEnabled()
     assert 'OCR used on 1 pages' in window.status.text()
+    assert 'Previewing paper.md' in window.log.toPlainText()
 
     errors: list[tuple[str, str]] = []
     monkeypatch.setattr(gui.QMessageBox, 'critical', lambda parent, title, text: errors.append((title, text)))

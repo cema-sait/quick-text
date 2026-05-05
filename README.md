@@ -9,6 +9,7 @@ A small Qt desktop GUI for converting academic PDFs into clean Markdown. It extr
 - Images into an adjacent `images/` directory
 - Equations as preserved PDF text where available, with math-like blocks highlighted
 - Optional OCR fallback for scanned pages when Tesseract is installed
+- Integrated Markdown preview with local images and tables rendered from the generated output
 
 The fast path is built for digitally generated academic papers. A 10-page text PDF should usually finish well under one minute on a modern laptop. Scanned PDFs are slower because OCR requires page rendering.
 
@@ -32,7 +33,7 @@ brew install tesseract
 python -m paper_md_extractor
 ```
 
-Choose a PDF, choose an output folder, then click **Convert**. The app writes:
+Choose a PDF, choose an output folder, then click **Convert**. The app previews the generated Markdown and writes:
 
 - `<paper-name>.md`
 - `images/` with extracted page images
