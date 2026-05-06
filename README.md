@@ -38,6 +38,12 @@ Choose a PDF, choose an output folder, then click **Convert**. The app previews 
 - `<paper-name>.md`
 - `images/` with extracted page images
 
+## Screenshots
+
+![Main interface before conversion](./screenshots/before-run.png)
+
+![Main interface after conversion with preview](./screenshots/after-run.png)
+
 ## Notes
 
 PDFs do not reliably encode equations, reading order, or table structure semantically. This app favors a fast deterministic extraction pipeline and keeps the output editable. For image-only scanned papers, enable OCR and expect slower conversion.
