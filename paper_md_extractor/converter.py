@@ -5,7 +5,7 @@ from pathlib import Path
 import html
 import re
 import time
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Literal
 
 try:
     import fitz
@@ -16,6 +16,7 @@ except ImportError as exc:  # pragma: no cover - exercised by GUI error path
 
 
 ProgressCallback = Callable[[str, int, int], None]
+ExtractionEngine = Literal["native", "pymupdf4llm"]
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class ConversionOptions:
     extract_tables: bool = True
     ocr_scanned_pages: bool = False
     extract_equations_as_images: bool = True
+    extraction_engine: ExtractionEngine = "native"
     image_zoom: float = 2.0
     min_text_chars_for_ocr_skip: int = 40
 
@@ -56,6 +58,11 @@ def convert_pdf_to_markdown(
     images_dir = destination / "images"
     if options.extract_images or options.extract_equations_as_images:
         images_dir.mkdir(parents=True, exist_ok=True)
+
+    if options.extraction_engine == "pymupdf4llm":
+        return _convert_pdf_with_pymupdf4llm(source, destination, images_dir, options, progress)
+    if options.extraction_engine != "native":
+        raise ValueError(f"Unsupported extraction engine: {options.extraction_engine}")
 
     started = time.perf_counter()
     image_count = 0
@@ -133,6 +140,108 @@ def convert_pdf_to_markdown(
         ocr_page_count=ocr_page_count,
         equation_image_count=equation_image_count,
     )
+
+
+def _convert_pdf_with_pymupdf4llm(
+    source: Path,
+    destination: Path,
+    images_dir: Path,
+    options: ConversionOptions,
+    progress: ProgressCallback | None,
+) -> ConversionResult:
+    started = time.perf_counter()
+    pymupdf4llm = _load_pymupdf4llm()
+
+    with fitz.open(source) as document:
+        total = document.page_count
+
+    if progress:
+        progress("Analyzing layout with PyMuPDF4LLM", 1, max(total, 1))
+
+    before_images = _snapshot_files(images_dir)
+    markdown = pymupdf4llm.to_markdown(
+        str(source),
+        write_images=options.extract_images,
+        image_path=str(images_dir) if options.extract_images else "",
+        embed_images=False,
+        page_chunks=False,
+        use_ocr=options.ocr_scanned_pages,
+        force_ocr=False,
+        show_progress=False,
+    )
+    if not isinstance(markdown, str):
+        markdown = _join_pymupdf4llm_chunks(markdown)
+
+    if progress:
+        progress("Writing Markdown", total, max(total, 1))
+
+    markdown = _rewrite_markdown_image_links(markdown, destination)
+    markdown_path = destination / f"{source.stem}.md"
+    markdown_path.write_text(_clean_markdown(markdown), encoding="utf-8")
+    written_images = _snapshot_files(images_dir) - before_images
+    elapsed = time.perf_counter() - started
+    return ConversionResult(
+        markdown_path=markdown_path,
+        images_dir=images_dir,
+        page_count=total,
+        elapsed_seconds=elapsed,
+        image_count=len(written_images) if options.extract_images else 0,
+        table_count=_count_markdown_tables(markdown),
+        ocr_page_count=0,
+        equation_image_count=0,
+    )
+
+
+def _load_pymupdf4llm():
+    try:
+        import pymupdf4llm
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyMuPDF4LLM layout extraction is optional. Install it with: "
+            "python -m pip install 'quick-text[layout]'"
+        ) from exc
+    return pymupdf4llm
+
+
+def _join_pymupdf4llm_chunks(chunks: object) -> str:
+    if not isinstance(chunks, list):
+        return str(chunks)
+    parts = []
+    for index, chunk in enumerate(chunks, start=1):
+        if isinstance(chunk, dict):
+            text = str(chunk.get("text") or "").strip()
+        else:
+            text = str(chunk).strip()
+        if text:
+            parts.append(f"## Page {index}\n\n{text}")
+    return "\n\n".join(parts)
+
+
+def _snapshot_files(directory: Path) -> set[Path]:
+    if not directory.exists():
+        return set()
+    return {path.resolve() for path in directory.rglob("*") if path.is_file()}
+
+
+def _rewrite_markdown_image_links(markdown: str, destination: Path) -> str:
+    def replace(match: re.Match[str]) -> str:
+        alt, target = match.group(1), match.group(2).strip()
+        if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target) or target.startswith("#"):
+            return match.group(0)
+        path = Path(target)
+        if not path.is_absolute():
+            return match.group(0)
+        try:
+            rel = path.resolve().relative_to(destination).as_posix()
+        except ValueError:
+            return match.group(0)
+        return f"![{alt}]({rel})"
+
+    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", replace, markdown)
+
+
+def _count_markdown_tables(markdown: str) -> int:
+    return len(re.findall(r"^\s*\|\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$", markdown, re.MULTILINE))
 
 
 def _format_metadata(metadata: dict[str, str]) -> str:

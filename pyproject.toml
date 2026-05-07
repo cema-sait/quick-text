@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=9.0", "coverage>=7.0"]
 ocr = ["pytesseract>=0.3.10"]
+layout = ["pymupdf4llm>=0.3.4"]
 
 [project.scripts]
 quick-text = "paper_md_extractor.gui:main"

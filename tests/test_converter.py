@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import fitz
 from PIL import Image
@@ -14,7 +15,10 @@ from paper_md_extractor.converter import (
     _clean_markdown,
     _extract_tables,
     _format_metadata,
+    _count_markdown_tables,
     _format_text,
+    _join_pymupdf4llm_chunks,
+    _rewrite_markdown_image_links,
     _looks_like_equation,
     _equation_block_rect,
     _line_rect,
@@ -121,6 +125,80 @@ def test_convert_pdf_without_optional_assets_skips_tables_and_images_dir(tmp_pat
     assert '![Extracted image]' not in markdown
     assert '### Table' not in markdown
 
+
+
+def test_convert_pdf_with_pymupdf4llm_uses_layout_adapter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pdf = tmp_path / 'layout.pdf'
+    build_rich_pdf(pdf)
+    calls: list[dict[str, object]] = []
+
+    def fake_to_markdown(doc, **kwargs):
+        calls.append({'doc': doc, **kwargs})
+        image_dir = Path(kwargs['image_path'])
+        image_dir.mkdir(parents=True, exist_ok=True)
+        written = image_dir / 'layout-p001-picture-01.png'
+        written.write_bytes(_png_bytes())
+        return f"# Layout Output\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n![Figure]({written})"
+
+    monkeypatch.setattr(converter, '_load_pymupdf4llm', lambda: SimpleNamespace(to_markdown=fake_to_markdown))
+    progress: list[tuple[str, int, int]] = []
+
+    result = convert_pdf_to_markdown(
+        pdf,
+        tmp_path / 'out',
+        ConversionOptions(extraction_engine='pymupdf4llm', extract_images=True, ocr_scanned_pages=True),
+        lambda message, page, total: progress.append((message, page, total)),
+    )
+
+    markdown = result.markdown_path.read_text(encoding='utf-8')
+    assert calls == [{
+        'doc': str(pdf.resolve()),
+        'write_images': True,
+        'image_path': str((tmp_path / 'out' / 'images').resolve()),
+        'embed_images': False,
+        'page_chunks': False,
+        'use_ocr': True,
+        'force_ocr': False,
+        'show_progress': False,
+    }]
+    assert result.page_count == 1
+    assert result.image_count == 1
+    assert result.table_count == 1
+    assert result.ocr_page_count == 0
+    assert result.equation_image_count == 0
+    assert progress == [('Analyzing layout with PyMuPDF4LLM', 1, 1), ('Writing Markdown', 1, 1)]
+    assert '![Figure](images/layout-p001-picture-01.png)' in markdown
+
+
+def test_pymupdf4llm_adapter_handles_missing_dependency(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pdf = tmp_path / 'layout.pdf'
+    build_rich_pdf(pdf)
+
+    def missing():
+        raise RuntimeError('PyMuPDF4LLM layout extraction is optional.')
+
+    monkeypatch.setattr(converter, '_load_pymupdf4llm', missing)
+    with pytest.raises(RuntimeError, match='optional'):
+        convert_pdf_to_markdown(pdf, tmp_path / 'out', ConversionOptions(extraction_engine='pymupdf4llm'))
+
+
+def test_pymupdf4llm_adapter_rejects_unknown_engine(tmp_path: Path) -> None:
+    pdf = tmp_path / 'layout.pdf'
+    build_rich_pdf(pdf)
+    options = ConversionOptions(extraction_engine='unknown')  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match='Unsupported extraction engine'):
+        convert_pdf_to_markdown(pdf, tmp_path / 'out', options)
+
+
+def test_pymupdf4llm_markdown_helpers_rewrite_chunks_and_tables(tmp_path: Path) -> None:
+    image = tmp_path / 'out' / 'images' / 'figure.png'
+    image.parent.mkdir(parents=True)
+    image.write_bytes(_png_bytes())
+    markdown = _rewrite_markdown_image_links(f'![Fig]({image}) ![Remote](https://example.com/a.png)', tmp_path / 'out')
+    assert f'![Fig](images/figure.png)' in markdown
+    assert '![Remote](https://example.com/a.png)' in markdown
+    assert _count_markdown_tables('| A | B |\n| --- | :---: |\n| 1 | 2 |') == 1
+    assert _join_pymupdf4llm_chunks([{'text': 'Alpha'}, {'text': ''}, {'text': 'Beta'}]) == '## Page 1\n\nAlpha\n\n## Page 3\n\nBeta'
 
 def test_convert_pdf_uses_ocr_when_native_text_is_sparse(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     pdf = tmp_path / 'scan.pdf'

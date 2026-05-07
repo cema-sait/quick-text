@@ -142,6 +142,7 @@ def test_convert_starts_worker_with_selected_options(monkeypatch: pytest.MonkeyP
     window.tables_check.setChecked(True)
     window.ocr_check.setChecked(True)
     window.equations_check.setChecked(False)
+    window.layout_engine_check.setChecked(True)
 
     captured: dict[str, object] = {}
 
@@ -193,6 +194,7 @@ def test_convert_starts_worker_with_selected_options(monkeypatch: pytest.MonkeyP
     assert options.extract_tables
     assert options.ocr_scanned_pages
     assert not options.extract_equations_as_images
+    assert options.extraction_engine == 'pymupdf4llm'
     assert not window.convert_button.isEnabled()
     assert 'Starting conversion' in window.log.toPlainText()
 

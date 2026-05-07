@@ -1,6 +1,6 @@
 # Paper Markdown Extractor
 
-[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen)](https://github.com/cema-sait/quick-text/actions/workflows/tests.yml)
+[![Coverage](https://img.shields.io/badge/coverage-95%25-brightgreen)](https://github.com/cema-sait/quick-text/actions/workflows/tests.yml)
 
 A small Qt desktop GUI for converting academic PDFs into clean Markdown. It extracts:
 
@@ -9,6 +9,7 @@ A small Qt desktop GUI for converting academic PDFs into clean Markdown. It extr
 - Images into an adjacent `images/` directory
 - Display equations cropped as broad row images for higher visual fidelity, including right-edge equation numbers, with text math blocks available as a fallback
 - Optional OCR fallback for scanned pages when Tesseract is installed
+- Optional PyMuPDF4LLM layout engine for difficult multi-column reading order
 - Integrated Markdown preview with local images, equation crops, and tables rendered from the generated output
 
 The fast path is built for digitally generated academic papers. A 10-page text PDF should usually finish well under one minute on a modern laptop. Scanned PDFs are slower because OCR requires page rendering.
@@ -27,13 +28,19 @@ Optional OCR engine for scanned PDFs:
 brew install tesseract
 ```
 
+Optional layout engine for complex page structure:
+
+```bash
+python -m pip install 'quick-text[layout]'
+```
+
 ## Run
 
 ```bash
 python -m paper_md_extractor
 ```
 
-Choose a PDF, choose an output folder, then click **Convert**. The app previews the generated Markdown and writes:
+Choose a PDF, choose an output folder, then click **Convert**. Enable **PyMuPDF4LLM layout** when a paper has difficult multi-column reading order or complex document structure. The app previews the generated Markdown and writes:
 
 - `<paper-name>.md`
 - `images/` with extracted page images

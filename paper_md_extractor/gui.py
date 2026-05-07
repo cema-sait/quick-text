@@ -89,6 +89,8 @@ class PaperMarkdownWindow(QMainWindow):
         self.ocr_check = QCheckBox("OCR scanned pages")
         self.equations_check = QCheckBox("Equations as images")
         self.equations_check.setChecked(True)
+        self.layout_engine_check = QCheckBox("PyMuPDF4LLM layout")
+        self.layout_engine_check.setToolTip("Use the optional PyMuPDF4LLM layout engine for reading order and document structure.")
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -154,6 +156,7 @@ class PaperMarkdownWindow(QMainWindow):
         options.addWidget(self.tables_check)
         options.addWidget(self.equations_check)
         options.addWidget(self.ocr_check)
+        options.addWidget(self.layout_engine_check)
         options.addStretch(1)
         form_layout.addRow("Extraction", options)
         root.addWidget(form_frame)
@@ -292,6 +295,7 @@ class PaperMarkdownWindow(QMainWindow):
             extract_tables=self.tables_check.isChecked(),
             ocr_scanned_pages=self.ocr_check.isChecked(),
             extract_equations_as_images=self.equations_check.isChecked(),
+            extraction_engine="pymupdf4llm" if self.layout_engine_check.isChecked() else "native",
         )
 
         self.worker_thread = QThread(self)
