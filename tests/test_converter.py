@@ -18,7 +18,12 @@ from paper_md_extractor.converter import (
     _count_markdown_tables,
     _format_text,
     _join_pymupdf4llm_chunks,
+    _relocate_layout_images,
     _rewrite_markdown_image_links,
+    _safe_artifact_filename,
+    _safe_artifact_stem,
+    _snapshot_files,
+    _unique_path,
     _looks_like_equation,
     _equation_block_rect,
     _line_rect,
@@ -128,7 +133,7 @@ def test_convert_pdf_without_optional_assets_skips_tables_and_images_dir(tmp_pat
 
 
 def test_convert_pdf_with_pymupdf4llm_uses_layout_adapter(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    pdf = tmp_path / 'layout.pdf'
+    pdf = tmp_path / 'Advert AD-4-226-2026 - Senior Research Fellow & AI Lead - CEMA!.pdf'
     build_rich_pdf(pdf)
     calls: list[dict[str, object]] = []
 
@@ -136,7 +141,7 @@ def test_convert_pdf_with_pymupdf4llm_uses_layout_adapter(monkeypatch: pytest.Mo
         calls.append({'doc': doc, **kwargs})
         image_dir = Path(kwargs['image_path'])
         image_dir.mkdir(parents=True, exist_ok=True)
-        written = image_dir / 'layout-p001-picture-01.png'
+        written = image_dir / f"{kwargs['filename']}-0001-00.png"
         written.write_bytes(_png_bytes())
         return f"# Layout Output\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n![Figure]({written})"
 
@@ -151,24 +156,47 @@ def test_convert_pdf_with_pymupdf4llm_uses_layout_adapter(monkeypatch: pytest.Mo
     )
 
     markdown = result.markdown_path.read_text(encoding='utf-8')
-    assert calls == [{
-        'doc': str(pdf.resolve()),
-        'write_images': True,
-        'image_path': str((tmp_path / 'out' / 'images').resolve()),
-        'embed_images': False,
-        'page_chunks': False,
-        'use_ocr': True,
-        'force_ocr': False,
-        'show_progress': False,
-    }]
+    assert len(calls) == 1
+    call = calls[0]
+    assert Path(call['doc']).name == 'Advert-AD-4-226-2026-Senior-Research-Fellow-AI-Lead-CEMA.pdf'
+    assert Path(call['image_path']).name == 'images'
+    assert Path(call['image_path']).parent.name.startswith('quick-text-layout-')
+    assert call['write_images'] is True
+    assert call['filename'] == 'Advert-AD-4-226-2026-Senior-Research-Fellow-AI-Lead-CEMA'
+    assert call['embed_images'] is False
+    assert call['page_chunks'] is False
+    assert call['use_ocr'] is True
+    assert call['force_ocr'] is False
+    assert call['show_progress'] is False
     assert result.page_count == 1
     assert result.image_count == 1
     assert result.table_count == 1
     assert result.ocr_page_count == 0
     assert result.equation_image_count == 0
     assert progress == [('Analyzing layout with PyMuPDF4LLM', 1, 1), ('Writing Markdown', 1, 1)]
-    assert '![Figure](images/layout-p001-picture-01.png)' in markdown
+    assert '![Figure](images/Advert-AD-4-226-2026-Senior-Research-Fellow-AI-Lead-CEMA-0001-00.png)' in markdown
 
+
+
+def test_pymupdf4llm_adapter_wraps_layout_engine_filesystem_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pdf = tmp_path / 'problem & name.pdf'
+    build_rich_pdf(pdf)
+
+    def fail_to_markdown(*args, **kwargs):
+        raise OSError('cannot open generated image path')
+
+    monkeypatch.setattr(converter, '_load_pymupdf4llm', lambda: SimpleNamespace(to_markdown=fail_to_markdown))
+    with pytest.raises(RuntimeError, match='layout extraction failed') as exc_info:
+        convert_pdf_to_markdown(pdf, tmp_path / 'out', ConversionOptions(extraction_engine='pymupdf4llm'))
+    assert isinstance(exc_info.value.__cause__, OSError)
+
+
+def test_safe_artifact_stem_removes_problematic_characters_and_limits_length() -> None:
+    assert _safe_artifact_stem('Advert AD-4-226-2026 - Senior Research Fellow & AI Lead - CEMA!') == (
+        'Advert-AD-4-226-2026-Senior-Research-Fellow-AI-Lead-CEMA'
+    )
+    assert _safe_artifact_stem('λλλ &&&') == 'document'
+    assert _safe_artifact_stem('a' * 120) == 'a' * 80
 
 def test_pymupdf4llm_adapter_handles_missing_dependency(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     pdf = tmp_path / 'layout.pdf'
@@ -188,6 +216,49 @@ def test_pymupdf4llm_adapter_rejects_unknown_engine(tmp_path: Path) -> None:
     options = ConversionOptions(extraction_engine='unknown')  # type: ignore[arg-type]
     with pytest.raises(ValueError, match='Unsupported extraction engine'):
         convert_pdf_to_markdown(pdf, tmp_path / 'out', options)
+
+
+
+def test_layout_image_relocation_sanitizes_links_and_handles_collisions(tmp_path: Path) -> None:
+    destination = tmp_path / 'out'
+    images_dir = destination / 'images'
+    source_dir = tmp_path / 'layout images'
+    source_dir.mkdir()
+    generated = source_dir / 'Bad Name & Formula?.png'
+    generated.write_bytes(_png_bytes())
+    images_dir.mkdir(parents=True)
+    (images_dir / 'Bad-Name-Formula.png').write_bytes(b'existing')
+
+    markdown = _relocate_layout_images(
+        f'![Abs]({generated}) ![Name]({generated.name}) ![Remote](https://example.com/a.png) ![Missing](missing.png)',
+        source_dir,
+        images_dir,
+        destination,
+    )
+
+    assert '![Abs](images/Bad-Name-Formula-2.png)' in markdown
+    assert '![Name](images/Bad-Name-Formula-2.png)' in markdown
+    assert '![Remote](https://example.com/a.png)' in markdown
+    assert '![Missing](missing.png)' in markdown
+    assert (images_dir / 'Bad-Name-Formula-2.png').read_bytes() == generated.read_bytes()
+
+
+def test_layout_image_relocation_passthroughs_empty_sources(tmp_path: Path) -> None:
+    assert _relocate_layout_images('![A](a.png)', tmp_path / 'missing', tmp_path / 'images', tmp_path) == '![A](a.png)'
+    empty = tmp_path / 'empty'
+    empty.mkdir()
+    assert _relocate_layout_images('plain', empty, tmp_path / 'images', tmp_path) == 'plain'
+
+
+def test_artifact_filename_snapshot_and_unique_path_helpers(tmp_path: Path) -> None:
+    assert _safe_artifact_filename('Bad Name & Formula?.PNG') == 'Bad-Name-Formula.png'
+    assert _safe_artifact_filename('!!!') == 'document.bin'
+    target = tmp_path / 'artifact.png'
+    assert _unique_path(target) == target
+    target.write_bytes(b'one')
+    assert _unique_path(target) == tmp_path / 'artifact-2.png'
+    assert _snapshot_files(tmp_path / 'missing') == set()
+    assert target.resolve() in _snapshot_files(tmp_path)
 
 
 def test_pymupdf4llm_markdown_helpers_rewrite_chunks_and_tables(tmp_path: Path) -> None:

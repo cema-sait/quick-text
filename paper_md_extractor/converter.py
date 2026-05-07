@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
+import tempfile
 import html
 import re
 import time
+import unicodedata
 from typing import Callable, Iterable, Literal
 
 try:
@@ -55,6 +58,7 @@ def convert_pdf_to_markdown(
         raise FileNotFoundError(source)
     destination.mkdir(parents=True, exist_ok=True)
 
+    artifact_stem = _safe_artifact_stem(source.stem)
     images_dir = destination / "images"
     if options.extract_images or options.extract_equations_as_images:
         images_dir.mkdir(parents=True, exist_ok=True)
@@ -91,7 +95,7 @@ def convert_pdf_to_markdown(
                 nonlocal equation_image_count
                 next_number = equation_image_count + 1
                 image_path = _extract_equation_image(
-                    page, images_dir, source.stem, page_index, next_number, rect, options.image_zoom
+                    page, images_dir, artifact_stem, page_index, next_number, rect, options.image_zoom
                 )
                 if image_path is None:
                     return None
@@ -119,7 +123,7 @@ def convert_pdf_to_markdown(
                     page_parts.append(f"\n\n### Table {page_index}.{table_number}\n\n{markdown_table}")
 
             if options.extract_images:
-                extracted = _extract_images(document, page, images_dir, source.stem, page_index)
+                extracted = _extract_images(document, page, images_dir, artifact_stem, page_index)
                 image_count += len(extracted)
                 for image_path in extracted:
                     rel = image_path.relative_to(destination).as_posix()
@@ -142,6 +146,15 @@ def convert_pdf_to_markdown(
     )
 
 
+def _safe_artifact_stem(stem: str, max_length: int = 80) -> str:
+    normalized = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode("ascii")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", normalized).strip("._-")
+    safe = re.sub(r"[-_.]{2,}", "-", safe)
+    if not safe:
+        safe = "document"
+    return safe[:max_length].rstrip("._-") or "document"
+
+
 def _convert_pdf_with_pymupdf4llm(
     source: Path,
     destination: Path,
@@ -159,16 +172,35 @@ def _convert_pdf_with_pymupdf4llm(
         progress("Analyzing layout with PyMuPDF4LLM", 1, max(total, 1))
 
     before_images = _snapshot_files(images_dir)
-    markdown = pymupdf4llm.to_markdown(
-        str(source),
-        write_images=options.extract_images,
-        image_path=str(images_dir) if options.extract_images else "",
-        embed_images=False,
-        page_chunks=False,
-        use_ocr=options.ocr_scanned_pages,
-        force_ocr=False,
-        show_progress=False,
-    )
+    safe_stem = _safe_artifact_stem(source.stem)
+    try:
+        with tempfile.TemporaryDirectory(prefix="quick-text-layout-") as temp_dir:
+            temp_root = Path(temp_dir)
+            layout_source = temp_root / f"{safe_stem}.pdf"
+            shutil.copy2(source, layout_source)
+            layout_images_dir = temp_root / "images"
+            if options.extract_images:
+                layout_images_dir.mkdir(parents=True, exist_ok=True)
+
+            markdown = pymupdf4llm.to_markdown(
+                str(layout_source),
+                write_images=options.extract_images,
+                image_path=str(layout_images_dir) if options.extract_images else "",
+                filename=safe_stem,
+                embed_images=False,
+                page_chunks=False,
+                use_ocr=options.ocr_scanned_pages,
+                force_ocr=False,
+                show_progress=False,
+            )
+            if isinstance(markdown, str) and options.extract_images:
+                markdown = _relocate_layout_images(markdown, layout_images_dir, images_dir, destination)
+    except Exception as exc:
+        raise RuntimeError(
+            "PyMuPDF4LLM layout extraction failed while processing the PDF. "
+            "Quick Text uses a temporary safe-named PDF and sanitized image artifacts for this engine, "
+            "but this can still happen if the output folder is unavailable or the PDF cannot be rendered."
+        ) from exc
     if not isinstance(markdown, str):
         markdown = _join_pymupdf4llm_chunks(markdown)
 
@@ -190,6 +222,53 @@ def _convert_pdf_with_pymupdf4llm(
         ocr_page_count=0,
         equation_image_count=0,
     )
+
+
+def _relocate_layout_images(markdown: str, source_dir: Path, images_dir: Path, destination: Path) -> str:
+    if not source_dir.exists():
+        return markdown
+
+    images_dir.mkdir(parents=True, exist_ok=True)
+    replacements: dict[str, str] = {}
+    for generated in sorted(path for path in source_dir.rglob("*") if path.is_file()):
+        target = _unique_path(images_dir / _safe_artifact_filename(generated.name))
+        shutil.copy2(generated, target)
+        rel = target.relative_to(destination).as_posix()
+        replacements[str(generated.resolve())] = rel
+        replacements[generated.name] = rel
+
+    if not replacements:
+        return markdown
+
+    def replace(match: re.Match[str]) -> str:
+        alt, target = match.group(1), match.group(2).strip()
+        if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target) or target.startswith("#"):
+            return match.group(0)
+        path = Path(target)
+        replacement = replacements.get(str(path.resolve())) if path.is_absolute() else None
+        replacement = replacement or replacements.get(target) or replacements.get(path.name)
+        if not replacement:
+            return match.group(0)
+        return f"![{alt}]({replacement})"
+
+    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", replace, markdown)
+
+
+def _safe_artifact_filename(filename: str) -> str:
+    path = Path(filename)
+    suffix = re.sub(r"[^A-Za-z0-9.]", "", path.suffix.lower())[:12]
+    stem = _safe_artifact_stem(path.stem)
+    return f"{stem}{suffix or '.bin'}"
+
+
+def _unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for index in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}-{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"Could not create a unique artifact path for {path}")
 
 
 def _load_pymupdf4llm():
