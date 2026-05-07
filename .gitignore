@@ -13,3 +13,4 @@ deployment/
 deployment-progress/
 paper_md_extractor/deployment/
 *.iconset/
+build/

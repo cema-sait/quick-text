@@ -198,7 +198,7 @@ def _load_pymupdf4llm():
     except ImportError as exc:
         raise RuntimeError(
             "PyMuPDF4LLM layout extraction is optional. Install it with: "
-            "python -m pip install 'quick-text[layout]'"
+            "uv pip install -e '.[layout]'"
         ) from exc
     return pymupdf4llm
 

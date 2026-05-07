@@ -31,7 +31,7 @@ brew install tesseract
 Optional layout engine for complex page structure:
 
 ```bash
-python -m pip install 'quick-text[layout]'
+uv pip install -e '.[layout]'
 ```
 
 ## Run
