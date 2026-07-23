@@ -209,8 +209,8 @@ class PaperMarkdownWindow(QMainWindow):
             QPushButton:hover { background: #f0f4f8; }
             QPushButton:pressed { background: #e2e8f0; }
             QPushButton:disabled { color: #8d949e; background: #ececea; }
-            QProgressBar { border: 1px solid #c8c8c0; border-radius: 6px; text-align: center; background: #ffffff; height: 18px; }
-            QProgressBar::chunk { background: #2f6f73; border-radius: 5px; }
+            QProgressBar::chunk { background: #2f6f73; border-radius: 5px; color: white; }
+            QProgressBar { border: 1px solid #c8c8c0; border-radius: 6px; text-align: center; background: #ffffff; height: 18px; color: black; }
             """
         )
 
