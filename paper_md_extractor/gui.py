@@ -103,6 +103,7 @@ class PaperMarkdownWindow(QMainWindow):
         self.log.setMinimumHeight(130)
 
         self.convert_button = QPushButton("Convert")
+        self.convert_button.setObjectName("ConvertButton")
         self.open_markdown_button = QPushButton("Open Markdown")
         self.open_button = QPushButton("Open Output Folder")
         self.open_button.setEnabled(False)
@@ -209,6 +210,10 @@ class PaperMarkdownWindow(QMainWindow):
             QPushButton:hover { background: #f0f4f8; }
             QPushButton:pressed { background: #e2e8f0; }
             QPushButton:disabled { color: #8d949e; background: #ececea; }
+            QPushButton#ConvertButton { background: #198754; border-color: #146c43; color: #ffffff; font-weight: 700; }
+            QPushButton#ConvertButton:hover { background: #157347; }
+            QPushButton#ConvertButton:pressed { background: #11633c; }
+            QPushButton#ConvertButton:disabled { color: #e8f5ee; background: #78b996; border-color: #78b996; }
             QProgressBar::chunk { background: #2f6f73; border-radius: 5px; color: white; }
             QProgressBar { border: 1px solid #c8c8c0; border-radius: 6px; text-align: center; background: #ffffff; height: 18px; color: black; }
             """

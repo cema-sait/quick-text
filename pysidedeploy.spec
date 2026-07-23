@@ -8,14 +8,14 @@ icon = /Users/paulkorir/PycharmProjects/quick-text/paper_md_extractor/assets/app
 
 [python]
 python_path = /Users/paulkorir/PycharmProjects/quick-text/.venv/bin/python
-packages = Nuitka==2.7.11
+packages = Nuitka==2.8.10
 android_packages = buildozer==1.5.0,cython==0.29.33
 
 [qt]
 qml_files = 
 excluded_qml_plugins = 
 modules = Core,DBus,Gui,Svg,Widgets
-plugins = accessiblebridge,iconengines,imageformats,platforms,platforms/darwin,platformthemes,styles
+plugins = platforms
 
 [android]
 wheel_pyside = 
@@ -25,7 +25,7 @@ plugins =
 [nuitka]
 macos.permissions = 
 mode = standalone
-extra_args = --quiet --lto=no --nofollow-import-to=pymupdf --nofollow-import-to=fitz --include-module=ntpath --include-module=glob --noinclude-qt-translations --include-data-dir=/Users/paulkorir/PycharmProjects/quick-text/paper_md_extractor/assets=paper_md_extractor/assets --include-data-files=/Users/paulkorir/PycharmProjects/quick-text/.venv/lib/python3.13/site-packages/fitz/*.py=fitz/ --include-data-files=/Users/paulkorir/PycharmProjects/quick-text/.venv/lib/python3.13/site-packages/pymupdf/*.py=pymupdf/ --include-data-files=/Users/paulkorir/PycharmProjects/quick-text/.venv/lib/python3.13/site-packages/pymupdf/*.so=pymupdf/ --include-data-files=/Users/paulkorir/PycharmProjects/quick-text/.venv/lib/python3.13/site-packages/pymupdf/*.dylib=pymupdf/
+extra_args = --quiet --lto=no --nofollow-import-to=pymupdf --nofollow-import-to=fitz --include-module=ntpath --include-module=glob --include-package=pymupdf4llm --noinclude-qt-translations --include-data-dir=/Users/paulkorir/PycharmProjects/quick-text/paper_md_extractor/assets=paper_md_extractor/assets --include-data-files=/Users/paulkorir/PycharmProjects/quick-text/.venv/lib/python3.13/site-packages/fitz/*.py=fitz/ --include-data-files=/Users/paulkorir/PycharmProjects/quick-text/.venv/lib/python3.13/site-packages/pymupdf/*.py=pymupdf/ --include-data-files=/Users/paulkorir/PycharmProjects/quick-text/.venv/lib/python3.13/site-packages/pymupdf/*.so=pymupdf/ --include-data-files=/Users/paulkorir/PycharmProjects/quick-text/.venv/lib/python3.13/site-packages/pymupdf/*.dylib=pymupdf/
 
 [buildozer]
 mode = debug
